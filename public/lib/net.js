@@ -818,108 +818,104 @@ export class ChatMessage {
         ChatMessage.showInput = false;
     }
 
-    static {
-        globalThis.floofSendChat = function (m) {
-            if (typeof m !== "string") return false;
-            m = m.trim();
-            if (!m.length) return false;
-            if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return false;
-            if (globalThis.__floofDebug) {
-                console.log("[Floof Mod Loader] >> chat send:", m);
-            }
-            state.socket.talk(SERVER_BOUND.CHAT_MESSAGE, m);
-            return true;
-        };
-
-        const _floofChatListeners = new Set();
-        globalThis.floofOnChat = function (cb) {
-            if (typeof cb !== "function") return function () {};
-            _floofChatListeners.add(cb);
-            return function () { _floofChatListeners.delete(cb); };
-        };
-
-        const _floofCaptureQueue = [];
-        globalThis.floofCaptureChat = function (predicate, opts) {
-            if (typeof opts === "number") opts = { timeoutMs: opts };
-            opts = opts || {};
-            const timeoutMs = opts.timeoutMs || 3000;
-            const isMulti =
-                (typeof opts.count === "number" && opts.count > 1) ||
-                typeof opts.idleMs === "number";
-
-            return new Promise(function (resolve) {
-                const entry = {
-                    predicate: predicate,
-                    isMulti: isMulti,
-                    count: opts.count,
-                    idleMs: opts.idleMs,
-                    collected: [],
-                };
-                const finalize = function () {
-                    clearTimeout(entry.overallTimer);
-                    clearTimeout(entry.idleTimer);
-                    const idx = _floofCaptureQueue.indexOf(entry);
-                    if (idx !== -1) _floofCaptureQueue.splice(idx, 1);
-                    if (isMulti) resolve(entry.collected.slice());
-                    else resolve(entry.collected[0] || null);
-                };
-                entry.finalize = finalize;
-                entry.overallTimer = setTimeout(finalize, timeoutMs);
-                _floofCaptureQueue.push(entry);
-            });
-        };
-
-        const _origPush = ChatMessage.allMessages.push.bind(ChatMessage.allMessages);
-        ChatMessage.allMessages.push = function () {
-            const r = _origPush.apply(ChatMessage.allMessages, arguments);
-            for (let i = 0; i < arguments.length; i++) {
-                const m = arguments[i];
-                if (!m) continue;
-                const evt = { type: m.type, username: m.username, message: m.message, color: m.color };
-
-                let captured = false;
-                for (let f = 0; f < _floofCaptureQueue.length; f++) {
-                    const entry = _floofCaptureQueue[f];
-                    try {
-                        if (entry.predicate(evt)) {
-                            entry.collected.push(evt);
-                            captured = true;
-                            if (!entry.isMulti) {
-                                entry.finalize();
-                            } else {
-                                if (typeof entry.idleMs === "number") {
-                                    clearTimeout(entry.idleTimer);
-                                    entry.idleTimer = setTimeout(entry.finalize, entry.idleMs);
-                                }
-                                if (typeof entry.count === "number" && entry.collected.length >= entry.count) {
-                                    entry.finalize();
-                                }
-                            }
-                            break;
-                        }
-                    } catch (e) {
-                        console.error("[floofCaptureChat] predicate error:", e);
-                    }
-                }
-
-                if (captured) {
-                    const ai = ChatMessage.allMessages.indexOf(m);
-                    if (ai !== -1) ChatMessage.allMessages.splice(ai, 1);
-                    const mi = ChatMessage.messages.indexOf(m);
-                    if (mi !== -1) ChatMessage.messages.splice(mi, 1);
-                    continue;
-                }
-
-                _floofChatListeners.forEach(function (fn) {
-                    try { fn(evt); } catch (e) { console.error("[floofOnChat] listener error:", e); }
-                });
-            }
-            return r;
-        };
-    }
 }
 
 new ChatMessage(1, "Welcome to the game!", "#FFFFFF");
+
+export function sendChatMessage(m) {
+    if (typeof m !== "string") return false;
+    m = m.trim();
+    if (!m.length) return false;
+    if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return false;
+    state.socket.talk(SERVER_BOUND.CHAT_MESSAGE, m);
+    return true;
+}
+
+const _chatListeners = new Set();
+export function onChatMessage(cb) {
+    if (typeof cb !== "function") return function () {};
+    _chatListeners.add(cb);
+    return function () { _chatListeners.delete(cb); };
+}
+
+const _captureQueue = [];
+export function captureChatMessage(predicate, opts) {
+    if (typeof opts === "number") opts = { timeoutMs: opts };
+    opts = opts || {};
+    const timeoutMs = opts.timeoutMs || 3000;
+    const isMulti =
+        (typeof opts.count === "number" && opts.count > 1) ||
+        typeof opts.idleMs === "number";
+
+    return new Promise(function (resolve) {
+        const entry = {
+            predicate: predicate,
+            isMulti: isMulti,
+            count: opts.count,
+            idleMs: opts.idleMs,
+            collected: [],
+        };
+        const finalize = function () {
+            clearTimeout(entry.overallTimer);
+            clearTimeout(entry.idleTimer);
+            const idx = _captureQueue.indexOf(entry);
+            if (idx !== -1) _captureQueue.splice(idx, 1);
+            if (isMulti) resolve(entry.collected.slice());
+            else resolve(entry.collected[0] || null);
+        };
+        entry.finalize = finalize;
+        entry.overallTimer = setTimeout(finalize, timeoutMs);
+        _captureQueue.push(entry);
+    });
+}
+
+const _origAllMessagesPush = ChatMessage.allMessages.push.bind(ChatMessage.allMessages);
+ChatMessage.allMessages.push = function () {
+    const r = _origAllMessagesPush.apply(ChatMessage.allMessages, arguments);
+    for (let i = 0; i < arguments.length; i++) {
+        const m = arguments[i];
+        if (!m) continue;
+        const evt = { type: m.type, username: m.username, message: m.message, color: m.color };
+
+        let captured = false;
+        for (let f = 0; f < _captureQueue.length; f++) {
+            const entry = _captureQueue[f];
+            try {
+                if (entry.predicate(evt)) {
+                    entry.collected.push(evt);
+                    captured = true;
+                    if (!entry.isMulti) {
+                        entry.finalize();
+                    } else {
+                        if (typeof entry.idleMs === "number") {
+                            clearTimeout(entry.idleTimer);
+                            entry.idleTimer = setTimeout(entry.finalize, entry.idleMs);
+                        }
+                        if (typeof entry.count === "number" && entry.collected.length >= entry.count) {
+                            entry.finalize();
+                        }
+                    }
+                    break;
+                }
+            } catch (e) {
+                console.error("[captureChatMessage] predicate error:", e);
+            }
+        }
+
+        if (captured) {
+            const ai = ChatMessage.allMessages.indexOf(m);
+            if (ai !== -1) ChatMessage.allMessages.splice(ai, 1);
+            const mi = ChatMessage.messages.indexOf(m);
+            if (mi !== -1) ChatMessage.messages.splice(mi, 1);
+            continue;
+        }
+
+        _chatListeners.forEach(function (fn) {
+            try { fn(evt); } catch (e) { console.error("[onChatMessage] listener error:", e); }
+        });
+    }
+    return r;
+};
 
 export class ClientSocket extends WebSocket {
     static Listener = class Listener {
@@ -1750,8 +1746,6 @@ export const state = {
     /** @type {OffscreenCanvas|null} */
     minimapImg: null
 };
-
-globalThis.__floofNetState = state;
 
 export const keyMap = new Set();
 export const mouse = {

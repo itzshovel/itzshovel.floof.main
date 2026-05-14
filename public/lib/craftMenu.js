@@ -1,7 +1,5 @@
 import { getPetalIcon, petalTooltip } from "./renders.js";
-
-globalThis.__floofGetPetalIcon = getPetalIcon;
-globalThis.__floofPetalTooltip = petalTooltip;
+import { state, sendChatMessage, onChatMessage, captureChatMessage } from "./net.js";
 
 (function () {
   var hoverEntry = null;
@@ -19,10 +17,10 @@ globalThis.__floofPetalTooltip = petalTooltip;
   var searchQuery = '';
 
   var fastCraft = false;
-  try { fastCraft = localStorage.getItem('floofModFastCraft') === 'true'; } catch (_) {}
+  try { fastCraft = localStorage.getItem('craftMenuFastCraft') === 'true'; } catch (_) {}
   function setFastCraft(val) {
     fastCraft = !!val;
-    try { localStorage.setItem('floofModFastCraft', String(fastCraft)); } catch (_) {}
+    try { localStorage.setItem('craftMenuFastCraft', String(fastCraft)); } catch (_) {}
   }
 
   function dlog()   { if (_debugMode) console.log.apply(console, ['[CraftMenu]'].concat([].slice.call(arguments))); }
@@ -61,22 +59,22 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
   function fetchCraftRates() {
     if (liveCraftRates || craftRatesFetching) return;
-    if (typeof globalThis.floofCaptureChat !== 'function') return;
-    if (typeof globalThis.floofSendChat !== 'function') return;
-    var s = globalThis.__floofNetState;
+    if (typeof captureChatMessage !== 'function') return;
+    if (typeof sendChatMessage !== 'function') return;
+    var s = state;
     if (!s || !s.socket || s.socket.readyState !== WebSocket.OPEN) return;
 
     var lobby = detectLobby(s);
     if (!lobby || lobby.name !== 'Desert Maze') return;
     craftRatesFetching = true;
-    var p = globalThis.floofCaptureChat(
+    var p = captureChatMessage(
       function (e) {
         return e.type === 1 && CRAFT_RATE_LINE_RE.test(e.message);
       },
 
       { count: 32, idleMs: 800, timeoutMs: 20000 }
     );
-    if (!globalThis.floofSendChat('/craft')) {
+    if (!sendChatMessage('/craft')) {
       craftRatesFetching = false;
       return;
     }
@@ -101,7 +99,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
   function getCraftRate(tierName) {
     if (liveCraftRates && liveCraftRates[tierName] != null) return liveCraftRates[tierName];
-    var preset = detectLobby(globalThis.__floofNetState);
+    var preset = detectLobby(state);
     if (preset && preset.rates && preset.rates[tierName] != null) return preset.rates[tierName];
     return CRAFT_SUCCESS_RATES[tierName];
   }
@@ -119,8 +117,8 @@ globalThis.__floofPetalTooltip = petalTooltip;
   var PITY_WINDOW_MS = 2500;
   var pityInterceptorStarted = false;
 
-  var _floofLoginAt = 0;
-  var _floofLastUsername = null;
+  var _loginAt = 0;
+  var _lastUsername = null;
   var POST_LOGIN_PITY_DELAY_MS = 1500;
 
   var DESERT_PITY_MIN_TIER_IDX = 3;
@@ -135,10 +133,10 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
   function startPityInterceptor() {
     if (pityInterceptorStarted) return;
-    if (typeof globalThis.floofCaptureChat !== 'function') return;
+    if (typeof captureChatMessage !== 'function') return;
     pityInterceptorStarted = true;
 
-    globalThis.floofCaptureChat(function (e) {
+    captureChatMessage(function (e) {
       var msg = String(e.message || '');
       var now = performance.now();
 
@@ -173,7 +171,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
         _pityLastMessageAt = now;
         var headerPrefix = singleHeader[1].trim();
         var inlineRate = singleHeader[2] != null ? parseFloat(singleHeader[2]) : null;
-        var sNow = globalThis.__floofNetState;
+        var sNow = state;
         var ttn = null, pn = null;
         if (sNow && sNow.tiers) {
           for (var ti = 0; ti < sNow.tiers.length; ti++) {
@@ -230,15 +228,15 @@ globalThis.__floofPetalTooltip = petalTooltip;
   }
 
   function fetchPityForTier(targetTier, petalName) {
-    if (typeof globalThis.floofSendChat !== 'function') return;
-    var s = globalThis.__floofNetState;
+    if (typeof sendChatMessage !== 'function') return;
+    var s = state;
     if (!s || !s.socket || s.socket.readyState !== WebSocket.OPEN) return;
     var lobby = detectLobby(s);
     if (!lobby || lobby.name !== 'Desert Maze') return;
     startPityInterceptor();
     var cmd = '/pity ' + targetTier + (petalName ? ' ' + petalName : '');
     _pendingBotPitySends.push(performance.now());
-    if (!globalThis.floofSendChat(cmd)) {
+    if (!sendChatMessage(cmd)) {
 
       _pendingBotPitySends.pop();
     }
@@ -247,9 +245,9 @@ globalThis.__floofPetalTooltip = petalTooltip;
   function fetchInitialPity() {
     if (pityInitialized) return;
 
-    if (_floofLoginAt === 0) return;
-    if (performance.now() - _floofLoginAt < POST_LOGIN_PITY_DELAY_MS) return;
-    var s = globalThis.__floofNetState;
+    if (_loginAt === 0) return;
+    if (performance.now() - _loginAt < POST_LOGIN_PITY_DELAY_MS) return;
+    var s = state;
     if (!s || !s.inventory || !s.tiers) return;
     if (!s.socket || s.socket.readyState !== WebSocket.OPEN) return;
     var lobby = detectLobby(s);
@@ -282,7 +280,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
       dlog('firePityRefresh: missing petalIdx/fromRarity', petalIdx, fromRarity);
       return;
     }
-    var s = globalThis.__floofNetState;
+    var s = state;
     if (!s || !s.tiers) return;
     var lobby = detectLobby(s);
     if (!lobby || lobby.name !== 'Desert Maze') {
@@ -407,18 +405,18 @@ globalThis.__floofPetalTooltip = petalTooltip;
     '<path d="M2 14 L7 9 M3 9 L7 9 L7 13"/></svg>';
 
   function injectStyles() {
-    if (document.getElementById('floofModStyles')) return;
+    if (document.getElementById('craftMenuStyles')) return;
     var st = document.createElement('style');
-    st.id = 'floofModStyles';
+    st.id = 'craftMenuStyles';
     st.textContent =
-      '#floofModPanel ::-webkit-scrollbar{width:10px;height:10px;}' +
-      '#floofModPanel ::-webkit-scrollbar-track{background:rgba(0,0,0,0.12);border-radius:4px;}' +
-      '#floofModPanel ::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.35);border-radius:4px;}' +
-      '#floofModPanel ::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,0.55);}' +
-      '#floofModPanel ::-webkit-scrollbar-corner{background:transparent;}' +
+      '#craftMenuPanel ::-webkit-scrollbar{width:10px;height:10px;}' +
+      '#craftMenuPanel ::-webkit-scrollbar-track{background:rgba(0,0,0,0.12);border-radius:4px;}' +
+      '#craftMenuPanel ::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.35);border-radius:4px;}' +
+      '#craftMenuPanel ::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,0.55);}' +
+      '#craftMenuPanel ::-webkit-scrollbar-corner{background:transparent;}' +
 
-      '@keyframes floofCraftSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}' +
-      '.floofCraftSpinning{animation:floofCraftSpin 0.5s linear infinite;transform-origin:center center;}';
+      '@keyframes craftMenuSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}' +
+      '.craftMenuSpinning{animation:craftMenuSpin 0.5s linear infinite;transform-origin:center center;}';
     (document.head || document.documentElement).appendChild(st);
   }
 
@@ -458,15 +456,15 @@ globalThis.__floofPetalTooltip = petalTooltip;
     render();
   }
 
-  var _floofLastTiersSig = null;
+  var _lastTiersSig = null;
   function updateButtonVisibility() {
     if (!btn) return;
-    var s = globalThis.__floofNetState;
+    var s = state;
 
     var currentUsername = s && s.username;
-    if (currentUsername && currentUsername !== _floofLastUsername) {
-      _floofLastUsername = currentUsername;
-      _floofLoginAt = performance.now();
+    if (currentUsername && currentUsername !== _lastUsername) {
+      _lastUsername = currentUsername;
+      _loginAt = performance.now();
       pityInitialized = false;
       dlog('login detected (' + currentUsername +
         '); /pity init scheduled for ' + POST_LOGIN_PITY_DELAY_MS + 'ms later');
@@ -474,8 +472,8 @@ globalThis.__floofPetalTooltip = petalTooltip;
     var names = (s && Array.isArray(s.tiers)) ? s.tiers.map(function (t) { return t && t.name; }) : null;
     var sig = names ? names.join('|') : null;
     var lobby = detectLobby(s);
-    if (sig !== _floofLastTiersSig) {
-      _floofLastTiersSig = sig;
+    if (sig !== _lastTiersSig) {
+      _lastTiersSig = sig;
       dlog('tiers update; matched preset=' + (lobby && lobby.name) + '; tiers=', names);
 
       pityInitialized = false;
@@ -497,10 +495,10 @@ globalThis.__floofPetalTooltip = petalTooltip;
       injectStyles();
       var c = document.getElementById('bottomButtons');
       if (!c) return;
-      if (document.getElementById('floofModButton')) return;
+      if (document.getElementById('craftMenuButton')) return;
 
       btn = document.createElement('button');
-      btn.id = 'floofModButton';
+      btn.id = 'craftMenuButton';
       btn.tabIndex = -1;
       btn.style.width = '40px';
       btn.style.height = '40px';
@@ -509,7 +507,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
       btn.style.display = 'none';
 
       panel = document.createElement('div');
-      panel.id = 'floofModPanel';
+      panel.id = 'craftMenuPanel';
 
       panel.style.cssText =
         'position:fixed;display:none;flex-direction:column;' +
@@ -520,7 +518,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
       document.body.appendChild(panel);
 
       tip = document.createElement('div');
-      tip.id = 'floofModTooltip';
+      tip.id = 'craftMenuTooltip';
       tip.style.cssText =
         'position:fixed;pointer-events:none;display:none;z-index:99999;' +
         'background:transparent;';
@@ -558,19 +556,19 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
   var fastCraftInjectAttempts = 0;
   function injectFastCraftToggle() {
-    if (document.getElementById('floofFastCraftCheckbox')) return;
+    if (document.getElementById('fastCraftCheckbox')) return;
     var menu = document.querySelector('#menus #optionsMenu');
     if (!menu) {
       if (fastCraftInjectAttempts++ < 50) setTimeout(injectFastCraftToggle, 200);
       return;
     }
     var label = document.createElement('label');
-    label.setAttribute('for', 'floofFastCraftCheckbox');
+    label.setAttribute('for', 'fastCraftCheckbox');
     label.textContent = 'Fast Craft:';
     var cb = document.createElement('input');
     cb.type = 'checkbox';
-    cb.id = 'floofFastCraftCheckbox';
-    cb.name = 'floofFastCraftCheckbox';
+    cb.id = 'fastCraftCheckbox';
+    cb.name = 'fastCraftCheckbox';
     cb.checked = fastCraft;
     cb.addEventListener('change', function () { setFastCraft(cb.checked); });
     menu.appendChild(label);
@@ -578,20 +576,9 @@ globalThis.__floofPetalTooltip = petalTooltip;
     menu.appendChild(document.createElement('br'));
   }
 
-  var craftLoggerAttempts = 0;
   function setupCraftChatLogger() {
-    if (typeof globalThis.floofOnChat !== 'function') {
-      if (craftLoggerAttempts++ < 50) {
-        setTimeout(setupCraftChatLogger, 200);
-      } else if (typeof globalThis.floofSendChat === 'function') {
-        dwarn('floofSendChat exists but floofOnChat does not — your chat-send-api mod is older than v1.1.0. Open the modloader popup and click Apply to refresh default mods, then reload the page.');
-      } else {
-        dwarn('chat-send-api mod not detected; craft results will not render in the panel.');
-      }
-      return;
-    }
     dlog('craft chat listener registered');
-    globalThis.floofOnChat(function (evt) {
+    onChatMessage(function (evt) {
 
       if (!evt) return;
       var msg = String(evt.message || '');
@@ -793,7 +780,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
   function doCraft() {
     if (craftPetalIdx == null || craftRarity == null) return;
-    var s = globalThis.__floofNetState;
+    var s = state;
     if (!s) return;
     var total = 0;
     for (var i = 0; i < 5; i++) total += craftSlots[i];
@@ -815,11 +802,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
         PETAL_NAME_SHORTHAND[petalName]) {
       craftPetalToken = PETAL_NAME_SHORTHAND[petalName];
     }
-    if (typeof globalThis.floofSendChat === 'function') {
-      globalThis.floofSendChat('/craft ' + tierName + ' ' + craftPetalToken + ' ' + total);
-    } else {
-      dwarn('floofSendChat unavailable; install chat-send-api mod');
-    }
+    sendChatMessage('/craft ' + tierName + ' ' + craftPetalToken + ' ' + total);
 
     orbitLastPositions = [];
     setCraftResult({
@@ -834,7 +817,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
     var snapshot = JSON.stringify(s.inventory);
     var deadline = Date.now() + 3000;
     var poll = setInterval(function () {
-      var st = globalThis.__floofNetState;
+      var st = state;
       var fresh = JSON.stringify(st && st.inventory);
       if (fresh !== snapshot || Date.now() > deadline) {
         clearInterval(poll);
@@ -903,7 +886,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
     if (fastCraft) { orbitRAF = null; return; }
 
-    var slots = container.querySelectorAll('[data-floof-orbit]');
+    var slots = container.querySelectorAll('[data-craft-orbit]');
     if (!slots.length) {
       orbitRAF = null;
       return;
@@ -945,7 +928,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
     if (!craftResult || (craftResult.type !== 'success' && craftResult.type !== 'fail')) {
       return;
     }
-    var slots = container.querySelectorAll('[data-floof-ease]');
+    var slots = container.querySelectorAll('[data-craft-ease]');
     if (!slots.length) {
 
       craftResult._easeComplete = true;
@@ -1046,7 +1029,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
       'margin-bottom:8px;flex:0 0 auto;overflow:hidden;' +
       'border-bottom:1px solid #000;';
 
-    var detected = detectLobby(globalThis.__floofNetState);
+    var detected = detectLobby(state);
     if (detected && detected.short) {
       var chip = document.createElement('div');
       chip.textContent = 'Current rarity set: ' + detected.short;
@@ -1106,9 +1089,9 @@ globalThis.__floofPetalTooltip = petalTooltip;
           'border-radius:8px;cursor:' + (clickable ? 'pointer' : 'default') + ';' +
           'transform:translate(' + initLeft + 'px,' + initTop + 'px);' +
           ((orbiting && filled) || easing ? 'will-change:transform;' : '');
-        if (orbiting && filled) slot.setAttribute('data-floof-orbit', String(i));
+        if (orbiting && filled) slot.setAttribute('data-craft-orbit', String(i));
 
-        if (easing) slot.setAttribute('data-floof-ease', String(i));
+        if (easing) slot.setAttribute('data-craft-ease', String(i));
 
         if (filled) {
           var sc = document.createElement('canvas');
@@ -1157,7 +1140,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
     if (merging && easeComplete && snapPetalIdx != null && snapRarity != null) {
       var resultRarity = snapRarity + 1;
-      var st = globalThis.__floofNetState;
+      var st = state;
       var resultTier = st && st.tiers && st.tiers[resultRarity];
       if (resultTier) {
         var centerSlot = document.createElement('div');
@@ -1209,7 +1192,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
     }
 
     if (firstFinalFrame) {
-      var burstStateRef = globalThis.__floofNetState;
+      var burstStateRef = state;
       var burstTier = burstStateRef && burstStateRef.tiers && burstStateRef.tiers[snapRarity + 1];
       var burstColor = (burstTier && burstTier.color) || '#ffd860';
       spawnSuccessBurst(box, STAR_CENTER.x, STAR_CENTER.y, burstColor);
@@ -1238,7 +1221,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
     var rateText = '?';
     if (craftRarity != null) {
-      var st = globalThis.__floofNetState;
+      var st = state;
 
       var nextTier = st && st.tiers && st.tiers[craftRarity + 1];
       var tn = nextTier && nextTier.name;
@@ -1287,10 +1270,10 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
   function render() {
     try {
-      var s = globalThis.__floofNetState;
-      var getIcon = globalThis.__floofGetPetalIcon;
+      var s = state;
+      var getIcon = getPetalIcon;
 
-      var oldWrap = document.getElementById('floofModGridWrapper');
+      var oldWrap = document.getElementById('craftMenuGridWrapper');
       var savedScrollTop = oldWrap ? oldWrap.scrollTop : 0;
       var savedScrollLeft = oldWrap ? oldWrap.scrollLeft : 0;
 
@@ -1310,7 +1293,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
       searchInput.type = 'text';
       searchInput.placeholder = 'Search petals...';
       searchInput.value = searchQuery;
-      searchInput.id = 'floofModSearch';
+      searchInput.id = 'craftMenuSearch';
       searchInput.style.cssText =
         'flex:1 1 auto;max-width:240px;background:#222;color:#fff;' +
         'border:1px solid #555;border-radius:4px;padding:3px 6px;' +
@@ -1320,7 +1303,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
 
         var pos = searchInput.selectionStart;
         render();
-        var fresh = document.getElementById('floofModSearch');
+        var fresh = document.getElementById('craftMenuSearch');
         if (fresh) {
           fresh.focus();
           if (typeof pos === 'number') {
@@ -1404,7 +1387,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
       var SIZE = computeIconSize(nRarities);
 
       var gridWrapper = document.createElement('div');
-      gridWrapper.id = 'floofModGridWrapper';
+      gridWrapper.id = 'craftMenuGridWrapper';
       gridWrapper.style.cssText = 'flex:1 1 auto;overflow-x:scroll;overflow-y:auto;min-height:0;';
       panel.appendChild(gridWrapper);
 
@@ -1513,7 +1496,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
   function showTooltip(target) {
     try {
       if (!hoverEntry) return;
-      var fn = globalThis.__floofPetalTooltip;
+      var fn = petalTooltip;
       if (typeof fn !== 'function') return;
       var img = fn(hoverEntry.index, hoverEntry.rarity);
       if (!img) return;
@@ -1532,7 +1515,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
       if (target && target.getBoundingClientRect) {
         rect = target.getBoundingClientRect();
       } else {
-        var wrapper = document.getElementById('floofModGridWrapper');
+        var wrapper = document.getElementById('craftMenuGridWrapper');
         if (wrapper) rect = wrapper.getBoundingClientRect();
       }
       if (rect) {
@@ -1569,7 +1552,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
   }
 
   function _runSimulation(petalIdx, rarityIdx, count, outcome) {
-    var s = globalThis.__floofNetState;
+    var s = state;
     var pname = (s && s.petalConfigs && s.petalConfigs[petalIdx]) ? s.petalConfigs[petalIdx].name : null;
     var targetTier = s.tiers[rarityIdx + 1];
     var targetTierName = targetTier ? targetTier.name : null;
@@ -1626,7 +1609,7 @@ globalThis.__floofPetalTooltip = petalTooltip;
       console.warn('[CraftMenu] SimCraft requires debug mode. Call CraftDebug(true) first.');
       return null;
     }
-    var s = globalThis.__floofNetState;
+    var s = state;
     if (!s || !s.petalConfigs || !s.tiers) {
       console.warn('[CraftMenu] SimCraft: no game state'); return null;
     }
